@@ -21,17 +21,17 @@
 #define REFRESH_CYCLE 500 
 
 // DISPLAY_INTERVAL shows the time it takes to have a time type on display.
-// HOURS_VALUE => 4 Seconds, MINUTES_VALUE => 5 seconds and SECONDS_VALUE => 6 Seconds.
+// HOURS_VALUE => 4 Seconds, MINUTES_VALUE => 3 seconds and SECONDS_VALUE => 10 Seconds.
 // In 15 seconds the 3 display time types should have been displayed and restarted the 
 // process all over again.
-#define SECONDS_DISPLAY_INTERVAL 4
-#define MINUTES_DISPLAY_INTERVAL 5
+#define SECONDS_DISPLAY_INTERVAL 5
+#define MINUTES_DISPLAY_INTERVAL 3
 #define HOURS_DISPLAY_INTERVAL 2
 
 // SECS_MIN_HRS_DIRECTION is the direction if the time type pixels movement from RIGHT to LEFT.
-#define SECS_MIN_HRS_DIRECTION 0x00
+#define SECS_MIN_HRS_DIRECTION 0x01
 // HRS_MIN_SECS_DIRECTION is the direction if the time type pixels movement from LEFT to RIGHT.
-#define HRS_MIN_SECS_DIRECTION 0x01
+#define HRS_MIN_SECS_DIRECTION 0x02
 
 int DIN = 2;
 int CS = 3;
@@ -53,21 +53,27 @@ byte display[][DIGIT_WIDTH] = {
   { B0111, B0101, B0111, B0001, B0111 },  // Number 9
 };
 
-// SecondsDisplay is a display identififier that shows that Seconds value is currently on display
-byte SecondsDisplay[3] = {B00000000, B00000011, B00000000};
+// DoubleDotsDisplay show the direction of screen time type update for the last two rows.
+byte DoubleDotsDisplay[3] = {B00000000, B00000011, B00000011};
 
-// MinutesDisplay is a display identififier that shows that Minutes value is currently on display
-byte MinutesDisplay[3] = {B00000000, B00011000, B00000000};
+// SingleDotDisplay show the direction of screen time type update for the last two rows.
+byte SingleDotDisplay[3] = {B00000000, B00001000, B00001000};
 
-// HoursDisplay is a display identififier that shows that Hours value is currently on display
-byte HoursDisplay[3] = {B00000000, B11000000, B00000000};
+// SecondsDisplay indicates the number of bytes shifts to be implemented to display seconds time type.
+byte SecondsDisplay = 0;
+
+// MinutesDisplay indicates the number of bytes shifts to be implemented to display minutes time type.
+byte MinutesDisplay = 3;
+
+// HoursDisplay indicates the number of bytes shifts to be implemented to display hours time type.
+byte HoursDisplay = 6;
 
 // dateTimes stores processed fields required to display date and time accurately.
-// The default time set up is 22:40:00 4/December/2023
+// The default time set up is 01:13:00 5/December/2023
 // Zero Resets seconds and start oscillator
-uint16_t dateTime[DATETIME_FIELDS] = {0, 13, 1, 5, 22, 2023};
+uint16_t dateTime[DATETIME_FIELDS] = {0, 13, 1, 5, 12, 2023};
 
-// currentDisplayType Seconds display type is set as the default initial type.
+// currentDisplayType has seconds display type is set as the default initial type.
 uint8_t currentDisplayType = SECONDS_DISPLAY;
 // currentPxlsMovement sets the default movement of the time type pixels as from RIGHT to LEFT.
 uint8_t currentPxlsMovement = SECS_MIN_HRS_DIRECTION;
@@ -121,7 +127,7 @@ void loop() {
 }
 
 // outputDigit the double digits value provided to the max7219 matrix display.
-void outputDigit(uint8_t address, uint8_t digitsToDisplay, byte timeType[3]) {
+void outputDigit(uint8_t address, uint8_t digitsToDisplay, byte shiftingPos) {
   if (digitsToDisplay >= MAX_DISPLAY_VALUE) {
     // Ignore displaying the invalid valid greater than 59.
     return;
@@ -139,9 +145,26 @@ void outputDigit(uint8_t address, uint8_t digitsToDisplay, byte timeType[3]) {
     lc.setRow(address, i, (pixelAtPos2 << 4 | pixelAtPos1));
   }
 
+  // By default the single dot binary shouldn't be shifted.
+  byte newPos = B00000000;
+  
   // Draw the time type pixels below.
-  for (int k=0; k < sizeof(timeType); k++){
-      lc.setRow(address, k+DIGIT_WIDTH, timeType[k]);
+  for (int k=0; k < sizeof(DoubleDotsDisplay); k++){
+      // If shifting dot dots is done from the center (after displaying minutes) then the single dot should be changed
+      if (shiftingPos == MinutesDisplay) {
+        switch(currentPxlsMovement) {
+          case SECS_MIN_HRS_DIRECTION:
+          newPos = SingleDotDisplay[k]>>shiftingPos;
+          break;
+
+          case HRS_MIN_SECS_DIRECTION:
+          newPos = SingleDotDisplay[k]<<shiftingPos;
+          break;
+        }
+      }
+
+      newPos = (DoubleDotsDisplay[k]<<shiftingPos) | newPos; // Join Double and Single Dot display BCD.
+      lc.setRow(address, k+DIGIT_WIDTH, newPos);
   }
 }
 
