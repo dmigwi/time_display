@@ -33,11 +33,11 @@
 // HRS_MIN_SECS_DIRECTION is the direction if the time type pixels movement from LEFT to RIGHT.
 #define HRS_MIN_SECS_DIRECTION 0x02
 
-int DIN = 2;
-int CS = 3;
+int DIN = 8;
+int CS = 7;
 int CLK = 4;
 
-LedControl lc = LedControl(DIN, CLK, CS, 1);
+LedControl lc = LedControl(DIN, CLK, CS, 0);
 
 // display contains byte array input for the Max7219 for the dot matrix display per number.
 byte display[][DIGIT_WIDTH] = {
@@ -69,9 +69,9 @@ byte MinutesDisplay = 3;
 byte HoursDisplay = 6;
 
 // dateTimes stores processed fields required to display date and time accurately.
-// The default time set up is 01:13:00 5/December/2023
+// The default time set up is 02:06:00 6/December/2023
 // Zero Resets seconds and start oscillator
-uint16_t dateTime[DATETIME_FIELDS] = {0, 13, 1, 5, 12, 2023};
+uint16_t dateTime[DATETIME_FIELDS] = {0, 06, 02, 6, 12, 2023};
 
 // currentDisplayType has seconds display type is set as the default initial type.
 uint8_t currentDisplayType = SECONDS_DISPLAY;
@@ -98,7 +98,7 @@ void setup() {
 
   // the zero refers to the MAX7219 number, it is zero for 1 chip
   lc.shutdown(0, false);  // turn off power saving, enables display
-  lc.setIntensity(0, 2);  // sets brightness (0~15 possible values)
+  lc.setIntensity(0, 0);  // sets brightness (0~15 possible values)
   lc.clearDisplay(0);     // clear screen
 }
 
