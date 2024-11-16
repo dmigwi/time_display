@@ -1,0 +1,33 @@
+# File configuration is described here:
+# https://arduino.github.io/arduino-cli/1.1/configuration/
+
+# board_manager:
+    # URLs to any additional Boards Manager package index files needed for your boards platforms.
+    # additional_urls: 
+    #  - http://arduino.esp8266.com/stable/package_esp8266com_index.json 
+
+directories:
+    # directory used to store Boards/Library Manager index files and Boards Manager platform installations
+    data: "./build/data"
+    # directory used to stage downloaded archives during Boards/Library Manager installations.
+    downloads: "./build/download"
+    # the equivalent of the Arduino IDE's "sketchbook" directory. Library Manager 
+    # installations are made to the libraries subdirectory of the user directory.
+    user: "./build/user"
+
+library:
+    enable_unsafe_install: false
+
+logging:
+    # path to the file where logs will be written
+    file: "./time-display.log"
+    # File logging format
+    format: txt
+    # File logging level as from warn, error, fatal to panic
+    level: warn
+
+build_cache:
+    # Make the build cache contents expire in 24 hrs
+    ttl: 24h
+    # Purge the cache after every build
+    compilations_before_purge: 1

@@ -69,9 +69,9 @@ byte MinutesDisplay = 3;
 byte HoursDisplay = 6;
 
 // dateTimes stores processed fields required to display date and time accurately.
-// The default time set up is 02:06:00 6/December/2023
+// The default time set up is 11:60:00 28/April/2024
 // Zero Resets seconds and start oscillator
-uint16_t dateTime[DATETIME_FIELDS] = {0, 06, 02, 6, 12, 2023};
+uint16_t dateTime[DATETIME_FIELDS] = {0, 05, 12, 28, 04, 2024};
 
 // currentDisplayType has seconds display type is set as the default initial type.
 uint8_t currentDisplayType = SECONDS_DISPLAY;
@@ -94,7 +94,7 @@ void setup() {
   Wire.begin();  // Join I2C bus
 
   // sets the initial time to the DS1307 RTC device.
-  // setDatetime(dateTime);
+  //setDatetime(dateTime);
 
   // the zero refers to the MAX7219 number, it is zero for 1 chip
   lc.shutdown(0, false);  // turn off power saving, enables display
@@ -138,7 +138,7 @@ void outputDigit(uint8_t address, uint8_t digitsToDisplay, byte shiftingPos) {
   uint8_t numberAtPos2 = (digitsToDisplay / 10) % 10;
 
   // Draw the digits pixels 
-  for (int i = 0; i < DIGIT_WIDTH; i++) {
+  for (uint8_t i = 0; i < DIGIT_WIDTH; i++) {
     byte pixelAtPos1 = display[numberAtPos1][i];
     byte pixelAtPos2 = display[numberAtPos2][i];
 
@@ -149,7 +149,7 @@ void outputDigit(uint8_t address, uint8_t digitsToDisplay, byte shiftingPos) {
   byte newPos = B00000000;
   
   // Draw the time type pixels below.
-  for (int k=0; k < sizeof(DoubleDotsDisplay); k++){
+  for (uint8_t k=0; k < sizeof(DoubleDotsDisplay); k++){
       // If shifting dot dots is done from the center (after displaying minutes) then the single dot should be changed
       if (shiftingPos == MinutesDisplay) {
         switch(currentPxlsMovement) {
