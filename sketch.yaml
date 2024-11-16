@@ -1,0 +1,18 @@
+# File configuration is described here:
+# https://arduino.github.io/arduino-cli/1.1/sketch-project-file/
+
+profiles:
+  leonardo:
+    notes: It enables a reproduceable builds from the time-display project
+    fqbn: arduino:avr:leonardo
+
+    platforms:
+      - platform: arduino:avr (1.8.6)
+
+    libraries:
+      - LedControl (1.0.6)
+
+default_profile: leonardo
+default_protocol: serial
+default_port_config:
+    baudrate: 115200
