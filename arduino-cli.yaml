@@ -14,6 +14,8 @@ directories:
     # the equivalent of the Arduino IDE's "sketchbook" directory. Library Manager 
     # installations are made to the libraries subdirectory of the user directory.
     user: "./build/user"
+    # it's the equivalent of the Arduino IDE's bundled libraries directory.
+    builtin.libraries: "./libs"
 
 library:
     enable_unsafe_install: false
