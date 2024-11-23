@@ -1,6 +1,11 @@
 # time_display
 
-## To install all the dependencies run:
+## Compiles the code in the working directory:
  ```
-    arduino-cli --config-file arduino-cli.yaml lib install LedControl@1.0.6
+   make compile
  ```
+
+ ## Builds and Flashes the code in the working directory to the arduino board:
+ ```
+   make upload
+```
