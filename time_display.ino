@@ -2,8 +2,19 @@
 #include <Wire.h>  // Include Wire Library Code (needed for I2C protocol devices)
 #include <arduino.h>
 
-namespace Settings 
+// namespace Settings
+namespace Settings
 {
+    // DisplayMode defines the various display modes supported.
+    enum DisplayMode: int {NORMAL, SET_SECONDS, SET_MINUTES, SET_HOURS, UNKNOWN};
+
+    // isModeFlag is set to true by the interrupt triggered by the mode button.
+    bool isModeFlag {false};
+
+    // isSetFlag is set to true by the interrupt triggered by the set button.
+    bool isSetFlag {false};
+
+    // namespace Settings
     // DATETIME_FIELDS ito track date and time a total of 6 fields are required.
     // They include; Seconds, Minutes, Hours, Day, Month and Year.
     constexpr int DATETIME_FIELDS{6};
@@ -33,125 +44,13 @@ namespace Settings
         {0x0, 0x0, 0x8, 0x0, 0x8, 0x0, 0x0, 0x0},  // Full-colon :
         {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},  // blank
     };
-
-    // isThinChar returns true if the value provided is thin character
-    // otherwise it returns false. 
-    bool isThinChar(int value)
-    {
-        return (value == 10 || value == 11);
-    }
-};  // namespace Settings
-
-// MatrixDisplay manages the matxrix display
-class MatrixDisplay {
-    public:
-        MatrixDisplay(int DIN, int CLK, int CS, int devices)
-            : m_lc{DIN, CLK, CS, (devices > maxDevices ? maxDevices : devices)} {}
-
-        void setUpDefaults() {
-            for (int addr{0}; addr < m_lc.getDeviceCount(); ++addr) {
-                m_lc.shutdown(addr, false);  // turn off power saving, enables display
-                m_lc.setIntensity(addr, 0);  // sets brightness (0~15 possible values)
-                m_lc.clearDisplay(addr);     // clear screen
-            }
-        }
-
-        // displayTime outputs respective time component on to each display available.
-        void displayTime() {
-            // charCount is set to of 8 because:
-            // Hours  => Mapped as 2 Characters
-            // Colon => Mapped as 1 Characters
-            // Minutes => Mapped as 2 Characters
-            // Colon => Mapped as 1 Characters
-            // Seconds => Mapped as 2 Characters
-            //  2:1:2:1:2
-            const int charCount{8};
-
-            // Only Hours, Minutes and Second should displayed as time.
-            const int fieldsToDisplay{3};
-
-            int mappedChars[charCount]{};
-            int index{0};
-
-            for (int i{0}; i < fieldsToDisplay; ++i)
-            {
-                int digitsToDisplay{Settings::dateTimeArray[i]};
-                digitsToDisplay %= digitsMask;  // Filter out values greater than mask;
-
-                mappedChars[index++] = digitsToDisplay % 10;  // ones position
-                mappedChars[index++] = (digitsToDisplay / 10) % 10;  // tens position
-
-                if (index < charCount)  // if not last field to display
-                {
-                    // Blink On and Off the Colon per second
-                    if (Settings::dateTimeArray[0] % 2 == 0)
-                        mappedChars[index++] = 10;  // Append Colon
-                    else
-                        mappedChars[index++] = 11;  // Append Blank Space
-                }
-            }
-
-            unsigned long rowData{0};
-            // Most characters use a width of 4 bits on the display. Some characters
-            // require less.
-            int normCharWidth{4};
-            // Characters like (:) only need 2 bits width on the display.
-            int thinCharWidth{2};
-
-            int countThinChars{0};
-            for (auto k : mappedChars) // count thin chars.
-                if (Settings::isThinChar(k)) ++countThinChars;
-
-            int charWidth {0};
-            // Draw the mapped characters pixels, one row at a time.
-            for (int row{0}; row < Settings::DISPLAY_ROWS; ++row) 
-            {
-                for (auto k : mappedChars) {
-                    unsigned long charRowPixels{Settings::display[k][row]};
-
-                    if (charWidth == 0) // if first char, add thin chars padding removed.
-                        charWidth += countThinChars;
-                    else
-                    {
-                        if (Settings::isThinChar(k))
-                            charWidth += thinCharWidth;
-                        else
-                            charWidth += normCharWidth;
-                    }
-
-                    rowData |= charRowPixels << charWidth;
-                }
-
-                displayRow(row, rowData);
-                rowData = 0;  // clear the previous data.
-                charWidth = 0; // reset the character width.
-            }
-        }
-
-        // displayRow plots display contents one row at a time for all the displays
-        // supported.
-        void displayRow(int rowNo, unsigned long rowData) {
-            for (int i{0}; i < m_lc.getDeviceCount(); ++i)
-            m_lc.setRow(i, rowNo, rowData >> (8 * i));  // extract 8 bits.
-        }
-
-    private:
-        LedControl m_lc;
-
-        // digitsMask defines a mask that only allows digits less than it to be
-        // displayed.
-        const int digitsMask{100};
-        // maxDevices defines the number of displays supported simulataneously.
-        const int maxDevices{4};
 };
 
+// DateTime reads and writes to the time module.
 class DateTime {
     public:
-        DateTime(bool setDefaultTime) {
+        DateTime() {
             Wire.begin();  // Join I2C bus
-
-            // Sets the default time into the Timer module if true
-            if (setDefaultTime) setDatetime();
         }
 
         // readDatetime is a routinely invoked method that returns the current time of
@@ -166,8 +65,8 @@ class DateTime {
             Wire.requestFrom(DS1307_ADDRESS, Settings::DATETIME_FIELDS);
 
             int i = 0;
-            while (Wire.available()) 
-            {  
+            while (Wire.available())
+            {
                 // peripheral may send less than requested
                 // This reads the shift register value stored at address defined by i.
                 // i.e. Register 0 stores Seconds, register 1 stores minutes, register 2
@@ -181,10 +80,7 @@ class DateTime {
             }
         }
 
-    private:
-        const int DS1307_ADDRESS{0x68};  // 104
-
-        // setDatetime should be called once when setting up the program. Its writes
+         // setDatetime should be called once when setting up the program. Its writes
         // the time set to the DS1307 RTC hardware.
         void setDatetime() {
             // Write data to DS1307 RTC. Start I2C protocol with DS1307 address.
@@ -200,7 +96,161 @@ class DateTime {
 
             Wire.endTransmission();  // Stop transmission and release the I2C bus
         }
+
+    private:
+        const int DS1307_ADDRESS{0x68};  // 104
+
 };
+
+// MatrixDisplay manages the matxrix display
+class MatrixDisplay : public DateTime {
+    public:
+        MatrixDisplay(int DIN, int CLK, int CS, int devices)
+            :  m_lc{DIN, CLK, CS, (devices > maxDevices ? maxDevices : devices)},
+               m_currentMode {Settings::DisplayMode::NORMAL}, DateTime{}
+        {}
+
+        void setUpDefaults() {
+            for (int addr{0}; addr < m_lc.getDeviceCount(); ++addr) {
+                m_lc.shutdown(addr, false);  // turn off power saving, enables display
+                m_lc.setIntensity(addr, 0);  // sets brightness (0~15 possible values)
+                m_lc.clearDisplay(addr);     // clear screen
+            }
+        }
+
+        // isThinChar returns true if the value provided is thin character
+        // otherwise it returns false.
+        bool isThinChar(int value){
+            return (value == 10 || value == 11);
+        }
+
+        // isBlink controlls the blinking function of the full colon.
+        // Blinking should only happen if the seconds are even and mode is normal.
+        bool isBlink(){
+            return (Settings::dateTimeArray[0] & 1) && (m_currentMode == Settings::DisplayMode::NORMAL);
+        }
+
+        // displayTime outputs respective time component on to each display available.
+        void displayTime() {
+            int index{0};
+
+            // Extracts the characters to displayed from the dateTimeArray and
+            // formats them based on the matrix character display order.
+            for (int i{0}; i < fieldsToDisplay; ++i)
+            {
+                int digitsToDisplay{Settings::dateTimeArray[i]};
+                digitsToDisplay %= digitsMask;  // Filter out values greater than mask;
+
+                mappedChars[index++] = digitsToDisplay % 10;  // ones position
+                mappedChars[index++] = (digitsToDisplay / 10) % 10;  // tens position
+
+                if (index != charCount)  // if not last field to display
+                {
+                    // Blink On and Off the Colon per second. If even, append
+                    // Blank Space else append a full colon.
+                    mappedChars[index++] = (isBlink() ? 10 : 11);
+                }
+            }
+
+            int charWidth {0};
+            int normCharWidth{4}; // Normal characters width = 4
+            int thinCharWidth{2}; // Thin characters width = 2.
+            unsigned long rowData{0};
+
+            // Draw the mapped characters pixels, one row at a time.
+            for (int row{0}; row < Settings::DISPLAY_ROWS; ++row)
+            {
+                for (auto k : mappedChars) {
+                    unsigned long charRowPixels{Settings::display[k][row]};
+
+                    // Assign thin char padding if, this char is found or if the
+                    // charWith is empty.
+                    charWidth += ((isThinChar(k) || charWidth == 0) ? thinCharWidth : normCharWidth);
+
+                    rowData |= charRowPixels << charWidth;
+                }
+
+                displayRow(row, rowData);
+                rowData = 0;  // clear the previous data.
+                charWidth = 0; // reset the characters width.
+            }
+        }
+
+        // displayRow plots display contents one row at a time for all the displays
+        // supported.
+        void displayRow(int rowNo, unsigned long rowData) {
+            for (int i{0}; i < m_lc.getDeviceCount(); ++i)
+            m_lc.setRow(i, rowNo, rowData >> (8 * i));  // extract 8 bits.
+        }
+
+        // CurrentMode returns a const reference copy of the current mode.
+        const Settings::DisplayMode& CurrentMode() const {
+            return m_currentMode;
+        }
+
+        // handleMode shifts the current mode to the next inline if an interrupt
+        // is detected.
+        void handleMode() {
+            if (Settings::isModeFlag)
+            {
+                // Shift the current mode to the next.
+                m_currentMode = static_cast<Settings::DisplayMode>(
+                    (m_currentMode+1) % Settings::DisplayMode::UNKNOWN
+                );
+                // Set the interrupt flag to off.
+                Settings::isModeFlag = false;
+            }
+        }
+
+        void handleTimeSetting() {
+            // Ignore further action if SetFlag is false or current mode is either
+            // NORMAL or UNKNOWN.
+            if (!Settings::isSetFlag || m_currentMode == Settings::DisplayMode::NORMAL ||
+                m_currentMode == Settings::DisplayMode::UNKNOWN)
+                return;
+
+            int limit {60}; // Set limit to a default of 60 seconds/minutes
+            if (m_currentMode == Settings::DisplayMode::SET_HOURS)
+                limit = 24;
+
+            // Increment by one and return to zero if limit is exceeded.
+            Settings::dateTimeArray[m_currentMode] = (Settings::dateTimeArray[m_currentMode] + 1) % limit;
+        }
+
+    private:
+        LedControl m_lc;
+
+        // m_currentMode tracks the current mode of display.
+        Settings::DisplayMode m_currentMode;
+
+        // digitsMask defines a mask that only allows digits less than it to be
+        // displayed.
+        const int digitsMask{100};
+        // maxDevices defines the number of displays supported simulataneously.
+        const int maxDevices{4};
+        // charCount is set to of 8 because:
+        // Hours  => Mapped as 2 Characters
+        // Colon => Mapped as 1 Characters
+        // Minutes => Mapped as 2 Characters
+        // Colon => Mapped as 1 Characters
+        // Seconds => Mapped as 2 Characters
+        static const int charCount{8};
+        // mappedChars holds the DateTime characters for the matrix display.
+        int mappedChars[charCount]{};
+        // Only Hours, Minutes and Second should displayed as time.
+        const int fieldsToDisplay{3};
+};
+
+// handleModeInterrupts set the interrupt Mode flag to true.
+void handleModeInterrupts() {
+    Settings::isModeFlag = true;
+}
+
+// handleSetInterrupts sets the interrupt Set flag to true.
+void handleSetInterrupts() {
+    Settings::isSetFlag = true;
+}
+
 
 int main(int, char*) {
     init();
@@ -214,21 +264,33 @@ int main(int, char*) {
     const int CS{9};
     const int CLK{8};
 
+    // Time setting pins
+    const int MODE_PIN {2};
+    const int SET_PIN {3};
+
     pinMode(DIN, OUTPUT);
     pinMode(CLK, OUTPUT);
     pinMode(CS, OUTPUT);
 
-    // True indicates that we want to update the timer datetime.
-    bool resetTime{false};
+    pinMode(MODE_PIN, INPUT_PULLUP);
+    pinMode(SET_PIN, INPUT_PULLUP);
+
+    // Handle Mode and Set interrupts on falling edge
+    attachInterrupt(MODE_PIN, handleModeInterrupts, FALLING);
+    attachInterrupt(SET_PIN, handleSetInterrupts, FALLING);
 
     MatrixDisplay md{DIN, CLK, CS, devices};
-    DateTime dt{resetTime};
 
     md.setUpDefaults();  // Set display defaults.
 
     while (true) {
-        dt.readDatetime();  // Reads the current time into dateTimeArray.
+        if(md.CurrentMode() == Settings::DisplayMode::NORMAL)
+            md.readDatetime(); // Reads the current time into dateTimeArray only in NORMAL mode
+
         md.displayTime();   // Displays the time set in dateTimeArray.
+        md.handleMode(); // increment mode.
+        md.handleTimeSetting(); // increment time field
+
         delay(Settings::REFRESH_CYCLE);
     }
 
