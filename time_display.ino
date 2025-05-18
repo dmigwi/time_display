@@ -6,13 +6,16 @@
 namespace Settings
 {
     // DisplayMode defines the various display modes supported.
-    enum DisplayMode: int {NORMAL, SET_SECONDS, SET_MINUTES, SET_HOURS, UNKNOWN};
+    enum DisplayMode: int {
+        SET_SECONDS, SET_MINUTES, SET_HOURS, // SET_TIME modes
+        NORMAL, UNKNOWN // Control modes
+    };
 
     // isModeFlag is set to true by the interrupt triggered by the mode button.
-    bool isModeFlag {false};
+    volatile bool isModeFlag {false};
 
     // isSetFlag is set to true by the interrupt triggered by the set button.
-    bool isSetFlag {false};
+    volatile bool isSetFlag {false};
 
     // namespace Settings
     // DATETIME_FIELDS ito track date and time a total of 6 fields are required.
@@ -107,7 +110,7 @@ class MatrixDisplay : public DateTime {
     public:
         MatrixDisplay(int DIN, int CLK, int CS, int devices)
             :  m_lc{DIN, CLK, CS, (devices > maxDevices ? maxDevices : devices)},
-               m_currentMode {Settings::DisplayMode::NORMAL}, DateTime{}
+                m_currentMode {Settings::DisplayMode::NORMAL}, DateTime{}
         {}
 
         void setUpDefaults() {
@@ -124,30 +127,59 @@ class MatrixDisplay : public DateTime {
             return (value == 10 || value == 11);
         }
 
+        // IsNormalMode returns true if the current mode is NORMAL otherwise false.
+        const bool IsNormalMode() const {
+            return (m_currentMode == Settings::DisplayMode::NORMAL);
+        }
+
+        // IsSetTimeMode returns true if the current mode is either of SET_TIME modes otherwise false.
+        const bool IsSetTimeMode() const {
+            return IsSetSecondsMode() || IsSetMinutesMode() ||  IsSetHoursMode();
+        }
+
+        // IsSetSecondsMode returns true if the current mode is SET_SECONDS otherwise false.
+        const bool IsSetSecondsMode() const {
+            return (m_currentMode == Settings::DisplayMode::SET_SECONDS);
+        }
+
+        // IsSetMinutesMode returns true if the current mode is SET_MINUTES otherwise false.
+        const bool IsSetMinutesMode() const {
+            return (m_currentMode == Settings::DisplayMode::SET_MINUTES);
+        }
+
+        // IsSetHoursMode returns true if the current mode is SET_HOURS otherwise false.
+        const bool IsSetHoursMode() const {
+            return (m_currentMode == Settings::DisplayMode::SET_HOURS);
+        }
+
         // isBlink controlls the blinking function of the full colon.
         // Blinking should only happen if the seconds are even and mode is normal.
         bool isBlink(){
-            return (Settings::dateTimeArray[0] & 1) && (m_currentMode == Settings::DisplayMode::NORMAL);
+            return (Settings::dateTimeArray[0] & 1) && IsNormalMode();
         }
 
         // displayTime outputs respective time component on to each display available.
         void displayTime() {
+            // Track the display character index position.
             int index{0};
 
             // Extracts the characters to displayed from the dateTimeArray and
             // formats them based on the matrix character display order.
-            for (int i{0}; i < fieldsToDisplay; ++i)
+            for (const auto field : fieldsToDisplay)
             {
-                int digitsToDisplay{Settings::dateTimeArray[i]};
+                int digitsToDisplay{Settings::dateTimeArray[field]};
                 digitsToDisplay %= digitsMask;  // Filter out values greater than mask;
 
                 mappedChars[index++] = digitsToDisplay % 10;  // ones position
+                setTimeModePos[index] = (field == m_currentMode);
+
                 mappedChars[index++] = (digitsToDisplay / 10) % 10;  // tens position
+                setTimeModePos[index] = (field == m_currentMode);
 
                 if (index != charCount)  // if not last field to display
                 {
                     // Blink On and Off the Colon per second. If even, append
-                    // Blank Space else append a full colon.
+                    // a blank space else append a full colon.
                     mappedChars[index++] = (isBlink() ? 10 : 11);
                 }
             }
@@ -156,6 +188,9 @@ class MatrixDisplay : public DateTime {
             int normCharWidth{4}; // Normal characters width = 4
             int thinCharWidth{2}; // Thin characters width = 2.
             unsigned long rowData{0};
+
+            // Reset the index and reuse it below.
+            index = 0;
 
             // Draw the mapped characters pixels, one row at a time.
             for (int row{0}; row < Settings::DISPLAY_ROWS; ++row)
@@ -167,7 +202,11 @@ class MatrixDisplay : public DateTime {
                     // charWith is empty.
                     charWidth += ((isThinChar(k) || charWidth == 0) ? thinCharWidth : normCharWidth);
 
-                    rowData |= charRowPixels << charWidth;
+                    // If one of the SET_TIME modes are active, highlight digits being editted.
+                    if (setTimeModePos[index++] && row == (Settings::DISPLAY_ROWS-1))
+                        charRowPixels ^= charRowPixels; // Highlight at the last row.
+
+                    rowData |= charRowPixels << charWidth; // Append the new char bits
                 }
 
                 displayRow(row, rowData);
@@ -183,35 +222,34 @@ class MatrixDisplay : public DateTime {
             m_lc.setRow(i, rowNo, rowData >> (8 * i));  // extract 8 bits.
         }
 
-        // CurrentMode returns a const reference copy of the current mode.
-        const Settings::DisplayMode& CurrentMode() const {
-            return m_currentMode;
-        }
-
         // handleMode shifts the current mode to the next inline if an interrupt
         // is detected.
         void handleMode() {
-            if (Settings::isModeFlag)
-            {
-                // Shift the current mode to the next.
-                m_currentMode = static_cast<Settings::DisplayMode>(
-                    (m_currentMode+1) % Settings::DisplayMode::UNKNOWN
-                );
-                // Set the interrupt flag to off.
-                Settings::isModeFlag = false;
-            }
+            if (!Settings::isModeFlag) // Ignore further action if mode flag is off.
+                return;
+
+            // Reset if current mode is NORMAL otherwise shift by one.
+            m_currentMode = static_cast<Settings::DisplayMode>(
+                IsNormalMode() ? 0 : (m_currentMode+1)
+            );
+            // Set the interrupt flag to off.
+            Settings::isModeFlag = false;
+
+            // if (IsNormalMode()) // If NORMAL update the currently set date.
+            //     setDatetime();
         }
 
         void handleTimeSetting() {
-            // Ignore further action if SetFlag is false or current mode is either
-            // NORMAL or UNKNOWN.
-            if (!Settings::isSetFlag || m_currentMode == Settings::DisplayMode::NORMAL ||
-                m_currentMode == Settings::DisplayMode::UNKNOWN)
+            // Ignore further action if SetFlag is false or current mode is
+            // neither any of the SET_TIME modes.
+            if (!Settings::isSetFlag || !IsSetTimeMode())
                 return;
 
-            int limit {60}; // Set limit to a default of 60 seconds/minutes
-            if (m_currentMode == Settings::DisplayMode::SET_HOURS)
-                limit = 24;
+            // Set the interrupt flag to off.
+            Settings::isSetFlag = false;
+
+            // limit set to 24 Hours if mode is SET_HOURS otherwise set to 60 Seconds/Minutes
+            int limit = (IsSetHoursMode() ? 24 : 60);
 
             // Increment by one and return to zero if limit is exceeded.
             Settings::dateTimeArray[m_currentMode] = (Settings::dateTimeArray[m_currentMode] + 1) % limit;
@@ -228,6 +266,12 @@ class MatrixDisplay : public DateTime {
         const int digitsMask{100};
         // maxDevices defines the number of displays supported simulataneously.
         const int maxDevices{4};
+        // Only Seconds, Minutes and Hours should displayed as time.
+        const Settings::DisplayMode fieldsToDisplay[3] {
+            Settings::DisplayMode::SET_SECONDS,
+            Settings::DisplayMode::SET_MINUTES,
+            Settings::DisplayMode::SET_HOURS,
+        };
         // charCount is set to of 8 because:
         // Hours  => Mapped as 2 Characters
         // Colon => Mapped as 1 Characters
@@ -237,18 +281,27 @@ class MatrixDisplay : public DateTime {
         static const int charCount{8};
         // mappedChars holds the DateTime characters for the matrix display.
         int mappedChars[charCount]{};
-        // Only Hours, Minutes and Second should displayed as time.
-        const int fieldsToDisplay{3};
+        // setTimeModePos holds a boolean value that is set to true if the
+        // current mode is set time mode for the specific fields.
+        bool setTimeModePos[charCount]{};
 };
 
 // handleModeInterrupts set the interrupt Mode flag to true.
 void handleModeInterrupts() {
     Settings::isModeFlag = true;
+    // static int pos = 0;
+    // Serial.print("Mode Interrupt >>>");
+    // Serial.print(pos++);
+    // Serial.print(">>>\n");
 }
 
 // handleSetInterrupts sets the interrupt Set flag to true.
 void handleSetInterrupts() {
     Settings::isSetFlag = true;
+    // static int ss = 0;
+    // Serial.print("Set Interrupt >>>");
+    // Serial.print(ss++);
+    // Serial.print(">>>\n");
 }
 
 
@@ -259,12 +312,14 @@ int main(int, char*) {
     USBDevice.attach();
 #endif
 
+    Serial.begin(115200);
+
     const int devices{4};
     const int DIN{10};
     const int CS{9};
     const int CLK{8};
 
-    // Time setting pins
+    // Time setting interrupt pins
     const int MODE_PIN {2};
     const int SET_PIN {3};
 
@@ -276,15 +331,23 @@ int main(int, char*) {
     pinMode(SET_PIN, INPUT_PULLUP);
 
     // Handle Mode and Set interrupts on falling edge
-    attachInterrupt(MODE_PIN, handleModeInterrupts, FALLING);
-    attachInterrupt(SET_PIN, handleSetInterrupts, FALLING);
+    attachInterrupt(digitalPinToInterrupt(MODE_PIN), handleModeInterrupts, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(SET_PIN), handleSetInterrupts, CHANGE);
+
+    // Handles fake interrupts signals triggered on start up.
+    do{
+        asm(""); // Prevents optimizing out the loop
+        // Serial.print("Removing Fake interrupts >>>\n");
+    }
+    while(Settings::isModeFlag || Settings::isSetFlag);
 
     MatrixDisplay md{DIN, CLK, CS, devices};
 
     md.setUpDefaults();  // Set display defaults.
 
     while (true) {
-        if(md.CurrentMode() == Settings::DisplayMode::NORMAL)
+        // Serial.print("Displaying Time >>>\n");
+        if(md.IsNormalMode())
             md.readDatetime(); // Reads the current time into dateTimeArray only in NORMAL mode
 
         md.displayTime();   // Displays the time set in dateTimeArray.
