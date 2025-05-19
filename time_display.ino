@@ -160,27 +160,31 @@ class MatrixDisplay : public DateTime {
 
         // displayTime outputs respective time component on to each display available.
         void displayTime() {
+
             // Track the display character index position.
-            int index{0};
+            size_t index = 0;
 
             // Extracts the characters to displayed from the dateTimeArray and
             // formats them based on the matrix character display order.
             for (const auto field : fieldsToDisplay)
             {
-                int digitsToDisplay{Settings::dateTimeArray[field]};
-                digitsToDisplay %= digitsMask;  // Filter out values greater than mask;
+                if (index + 1 >= charCount) break;
 
-                mappedChars[index++] = digitsToDisplay % 10;  // ones position
-                setTimeModePos[index] = (field == m_currentMode);
+                // Filter out values greater than mask;
+                int digitsToDisplay {Settings::dateTimeArray[field] % digitsMask};
+                mappedChars[index] = digitsToDisplay % 10;  // ones position
 
-                mappedChars[index++] = (digitsToDisplay / 10) % 10;  // tens position
-                setTimeModePos[index] = (field == m_currentMode);
+                // highlight bits are displayed on the last row.
+                byte highlight  {(field == m_currentMode) ? 0xF : 0x0};
+                setTimeModePos[index++] = highlight;
 
-                if (index != charCount)  // if not last field to display
-                {
-                    // Blink On and Off the Colon per second. If even, append
-                    // a blank space else append a full colon.
-                    mappedChars[index++] = (isBlink() ? 10 : 11);
+                mappedChars[index] = (digitsToDisplay / 10) % 10;  // tens position
+                setTimeModePos[index++] = highlight;
+
+                // Append colon/blink character between fields if space allows
+                if (index < charCount - 1) {
+                    mappedChars[index] = (isBlink() ? 10 : 11);
+                    setTimeModePos[index++] = 0x0;
                 }
             }
 
@@ -189,26 +193,24 @@ class MatrixDisplay : public DateTime {
             int thinCharWidth{2}; // Thin characters width = 2.
             unsigned long rowData{0};
 
-            // Reset the index and reuse it below.
-            index = 0;
-
             // Draw the mapped characters pixels, one row at a time.
             for (int row{0}; row < Settings::DISPLAY_ROWS; ++row)
             {
-                for (auto k : mappedChars) {
-                    unsigned long charRowPixels{Settings::display[k][row]};
+                // Reset the index and reuse it below.
+                index = 0;
+                for (const auto k : mappedChars) {
+                    unsigned long charRowPixels{ Settings::display[k][row]};
+
+                    // If one of the SET_TIME modes are active, highlight digits being editted.
+                    if (row == (Settings::DISPLAY_ROWS-1))
+                        charRowPixels = setTimeModePos[index++]; // Highlight at the last row.
 
                     // Assign thin char padding if, this char is found or if the
                     // charWith is empty.
                     charWidth += ((isThinChar(k) || charWidth == 0) ? thinCharWidth : normCharWidth);
 
-                    // If one of the SET_TIME modes are active, highlight digits being editted.
-                    if (setTimeModePos[index++] && row == (Settings::DISPLAY_ROWS-1))
-                        charRowPixels ^= charRowPixels; // Highlight at the last row.
-
                     rowData |= charRowPixels << charWidth; // Append the new char bits
                 }
-
                 displayRow(row, rowData);
                 rowData = 0;  // clear the previous data.
                 charWidth = 0; // reset the characters width.
@@ -228,15 +230,15 @@ class MatrixDisplay : public DateTime {
             if (!Settings::isModeFlag) // Ignore further action if mode flag is off.
                 return;
 
-            // Reset if current mode is NORMAL otherwise shift by one.
+            // Reset if current mode is not SET_TIME mode otherwise shift by one.
             m_currentMode = static_cast<Settings::DisplayMode>(
-                IsNormalMode() ? 0 : (m_currentMode+1)
+                IsSetTimeMode() ? (m_currentMode+1) : 0
             );
             // Set the interrupt flag to off.
             Settings::isModeFlag = false;
 
-            // if (IsNormalMode()) // If NORMAL update the currently set date.
-            //     setDatetime();
+            if (IsNormalMode()) // If NORMAL update the currently set date.
+                setDatetime();
         }
 
         void handleTimeSetting() {
@@ -279,29 +281,23 @@ class MatrixDisplay : public DateTime {
         // Colon => Mapped as 1 Characters
         // Seconds => Mapped as 2 Characters
         static const int charCount{8};
+
         // mappedChars holds the DateTime characters for the matrix display.
-        int mappedChars[charCount]{};
+        int mappedChars[charCount] {0};
+
         // setTimeModePos holds a boolean value that is set to true if the
         // current mode is set time mode for the specific fields.
-        bool setTimeModePos[charCount]{};
+        byte setTimeModePos[charCount] {0};
 };
 
 // handleModeInterrupts set the interrupt Mode flag to true.
 void handleModeInterrupts() {
     Settings::isModeFlag = true;
-    // static int pos = 0;
-    // Serial.print("Mode Interrupt >>>");
-    // Serial.print(pos++);
-    // Serial.print(">>>\n");
 }
 
 // handleSetInterrupts sets the interrupt Set flag to true.
 void handleSetInterrupts() {
     Settings::isSetFlag = true;
-    // static int ss = 0;
-    // Serial.print("Set Interrupt >>>");
-    // Serial.print(ss++);
-    // Serial.print(">>>\n");
 }
 
 
@@ -312,7 +308,8 @@ int main(int, char*) {
     USBDevice.attach();
 #endif
 
-    Serial.begin(115200);
+    // Serial.begin(115200);
+    delay(1000); // Delay
 
     const int devices{4};
     const int DIN{10};
@@ -331,22 +328,13 @@ int main(int, char*) {
     pinMode(SET_PIN, INPUT_PULLUP);
 
     // Handle Mode and Set interrupts on falling edge
-    attachInterrupt(digitalPinToInterrupt(MODE_PIN), handleModeInterrupts, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(SET_PIN), handleSetInterrupts, CHANGE);
-
-    // Handles fake interrupts signals triggered on start up.
-    do{
-        asm(""); // Prevents optimizing out the loop
-        // Serial.print("Removing Fake interrupts >>>\n");
-    }
-    while(Settings::isModeFlag || Settings::isSetFlag);
+    attachInterrupt(digitalPinToInterrupt(MODE_PIN), handleModeInterrupts, RISING);
+    attachInterrupt(digitalPinToInterrupt(SET_PIN), handleSetInterrupts, RISING);
 
     MatrixDisplay md{DIN, CLK, CS, devices};
-
     md.setUpDefaults();  // Set display defaults.
 
     while (true) {
-        // Serial.print("Displaying Time >>>\n");
         if(md.IsNormalMode())
             md.readDatetime(); // Reads the current time into dateTimeArray only in NORMAL mode
 
