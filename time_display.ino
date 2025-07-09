@@ -21,6 +21,18 @@ namespace Settings
     // is in progress otherwise false.
     volatile bool isI2CActive {false};
 
+    // lastModeTime defines the last timestamped recorded when the Mode
+    // interrupt was activated.
+    volatile unsigned long lastModeTime = 0;
+
+    // lastSetTime defines the last timestamped recorded when the Set
+    // interrupt was activated.
+    volatile unsigned long lastSetTime = 0;
+
+    // DEBOUNCE_DELAY defines the time in milliseconds that a mechanical switch
+    // has to wait be triggering an actual button click.
+    constexpr int DEBOUNCE_DELAY {1000};
+
     // namespace Settings
     // DATETIME_FIELDS ito track date and time a total of 6 fields are required.
     // They include; Seconds, Minutes, Hours, Day, Month and Year.
@@ -33,7 +45,7 @@ namespace Settings
 
     // dateTimeArray stores processed fields required to display date and time
     // accurately. The default time set up is 02:32:11  20/May/2025.
-    int dateTimeArray[DATETIME_FIELDS] = {11, 32, 02, 20, 05, 2025};
+    int dateTimeArray[DATETIME_FIELDS] = {11, 32, 12, 20, 05, 2025};
 
     // display contains byte array input for the Max7219 for the dot matrix display
     // per number.
@@ -67,7 +79,7 @@ class DateTime {
             Settings::isI2CActive = true;
 
             // Start I2C protocol with DS1307 address
-            Wire.beginTransmission( DS1307_ADDRESS);
+            Wire.beginTransmission(DS1307_ADDRESS);
             Wire.write(0);                // Send register address
             Wire.endTransmission(false);  // I2C restart
 
@@ -85,7 +97,8 @@ class DateTime {
                 byte data = Wire.read();  // receive a byte.
 
                 // Convert Hex to decimal
-                Settings::dateTimeArray[i] = (data / 16) * 10 + (data % 16);
+                auto elem = div(data, 16);
+                Settings::dateTimeArray[i] = elem.quot * 10 + elem.rem;
                 i++;
             }
 
@@ -105,9 +118,8 @@ class DateTime {
 
             // Write data for the 6 data fields
             for (int i{0}; i < Settings::DATETIME_FIELDS; i++) {
-                byte data{(Settings::dateTimeArray[i] / 10) * 16 +
-                            (Settings::dateTimeArray[i] % 10)};
-                Wire.write(data);
+                auto data = div(Settings::dateTimeArray[i], 10);
+                Wire.write(data.quot * 16 + data.rem);
             }
 
             Wire.endTransmission();  // Stop transmission and release the I2C bus
@@ -143,46 +155,36 @@ class MatrixDisplay : public DateTime {
 
         // isThinChar returns true if the value provided is thin character
         // otherwise it returns false.
-        bool isThinChar(int value){
-            return (value == 10 || value == 11);
-        }
+        const bool isThinChar(int value) const { return (value == 10 || value == 11); }
 
         // IsNormalMode returns true if the current mode is NORMAL otherwise false.
-        const bool IsNormalMode() const {
-            return (m_currentMode == Settings::DisplayMode::NORMAL);
-        }
+        const bool IsNormalMode() const { return (m_currentMode == Settings::DisplayMode::NORMAL); }
 
         // IsSetTimeMode returns true if the current mode is either of SET_TIME modes otherwise false.
-        const bool IsSetTimeMode() const {
-            return IsSetSecondsMode() || IsSetMinutesMode() ||  IsSetHoursMode();
-        }
+        const bool IsSetTimeMode() const { return IsSetSecondsMode() || IsSetMinutesMode() ||  IsSetHoursMode(); }
 
         // IsSetSecondsMode returns true if the current mode is SET_SECONDS otherwise false.
-        const bool IsSetSecondsMode() const {
-            return (m_currentMode == Settings::DisplayMode::SET_SECONDS);
-        }
+        const bool IsSetSecondsMode() const { return (m_currentMode == Settings::DisplayMode::SET_SECONDS); }
 
         // IsSetMinutesMode returns true if the current mode is SET_MINUTES otherwise false.
-        const bool IsSetMinutesMode() const {
-            return (m_currentMode == Settings::DisplayMode::SET_MINUTES);
-        }
+        const bool IsSetMinutesMode() const { return (m_currentMode == Settings::DisplayMode::SET_MINUTES); }
 
         // IsSetHoursMode returns true if the current mode is SET_HOURS otherwise false.
-        const bool IsSetHoursMode() const {
-            return (m_currentMode == Settings::DisplayMode::SET_HOURS);
-        }
+        const bool IsSetHoursMode() const { return (m_currentMode == Settings::DisplayMode::SET_HOURS); }
 
         // isBlink controlls the blinking function of the full colon.
         // Blinking should only happen if the seconds are even and mode is normal.
-        bool isBlink(){
-            return (Settings::dateTimeArray[0] & 1) && IsNormalMode();
-        }
+        const bool isBlink() const { return (Settings::dateTimeArray[0] & 1) && IsNormalMode(); }
+
+        // getLimit returns the max limit set to 24 Hours if mode is SET_HOURS
+        // otherwise set to 60 Seconds/Minutes
+        const int getLimit() const { return (IsSetHoursMode() ? 24 : 60); };
 
         // displayTime outputs respective time component on to each display available.
         void displayTime() {
 
             // Track the display character index position.
-            size_t index = 0;
+            index = 0;
 
             // Extracts the characters to displayed from the dateTimeArray and
             // formats them based on the matrix character display order.
@@ -208,10 +210,8 @@ class MatrixDisplay : public DateTime {
                 }
             }
 
-            int charWidth {0};
-            int normCharWidth{4}; // Normal characters width = 4
-            int thinCharWidth{2}; // Thin characters width = 2.
-            unsigned long rowData{0};
+            rowData = 0;  // reset the previous data.
+            charWidth = 0; // reset the characters width.
 
             // Draw the mapped characters pixels, one row at a time.
             for (int row{0}; row < Settings::DISPLAY_ROWS; ++row)
@@ -231,6 +231,7 @@ class MatrixDisplay : public DateTime {
 
                     rowData |= charRowPixels << charWidth; // Append the new char bits
                 }
+
                 displayRow(row, rowData);
                 rowData = 0;  // clear the previous data.
                 charWidth = 0; // reset the characters width.
@@ -247,7 +248,8 @@ class MatrixDisplay : public DateTime {
         // handleMode shifts the current mode to the next inline if an interrupt
         // is detected.
         void handleMode() {
-            if (!Settings::isModeFlagOn) // Ignore further action if mode flag is off.
+            // Ignore further action if mode flag is off or interrupt if i2c is in progress
+            if (!Settings::isModeFlagOn || Settings::isI2CActive) 
                 return;
 
             // Set the interrupt flag to off.
@@ -255,7 +257,7 @@ class MatrixDisplay : public DateTime {
 
             // Reset if current mode is a SET_TIME mode shift by one otherwise set it to seconds.
             m_currentMode = static_cast<Settings::DisplayMode>(
-                (m_currentMode+1) %  Settings::UNKNOWN
+                div(m_currentMode+1, Settings::UNKNOWN).rem
             );
 
             if (IsNormalMode()) // If NORMAL update the currently set date.
@@ -264,18 +266,19 @@ class MatrixDisplay : public DateTime {
 
         void handleTimeSetting() {
             // Ignore further action if SetFlag is false or current mode is
-            // neither any of the SET_TIME modes.
-            if (!Settings::isSetFlagOn || !IsSetTimeMode())
+            // neither any of the SET_TIME modes. Also ignore handling the
+            // interrupt if i2c is in progress.
+            if (!Settings::isSetFlagOn || !IsSetTimeMode() || Settings::isI2CActive)
                 return;
 
             // Set the interrupt flag to off.
             Settings::isSetFlagOn = false;
 
-            // limit set to 24 Hours if mode is SET_HOURS otherwise set to 60 Seconds/Minutes
-            int limit = (IsSetHoursMode() ? 24 : 60);
-
             // Increment by one and return to zero if limit is exceeded.
-            Settings::dateTimeArray[m_currentMode] = (Settings::dateTimeArray[m_currentMode] + 1) % limit;
+            Settings::dateTimeArray[m_currentMode]++;
+            if (Settings::dateTimeArray[m_currentMode] >= getLimit())
+                Settings::dateTimeArray[m_currentMode] = (Settings::dateTimeArray[m_currentMode] % getLimit());
+            // Serial.println(Settings::dateTimeArray[m_currentMode]);
         }
 
     private:
@@ -309,18 +312,32 @@ class MatrixDisplay : public DateTime {
         // setTimeModePos holds a boolean value that is set to true if the
         // current mode is set time mode for the specific fields.
         byte setTimeModePos[charCount] {0};
+
+        // displayTime private function variables.
+        int charWidth {0};
+        int normCharWidth{4}; // Normal characters width = 4
+        int thinCharWidth{2}; // Thin characters width = 2.
+        unsigned long rowData{0};
+        size_t index = 0;
 };
 
+unsigned long now;
 // handleModeInterrupts set the interrupt Mode flag to true.
 void handleModeInterrupts() {
-    if (!Settings::isI2CActive) // Skip setting the interrupt if i2c is in progress
+    now = millis();
+    if (!Settings::isI2CActive && (now - Settings::lastModeTime > Settings::DEBOUNCE_DELAY)) {
         Settings::isModeFlagOn = true;
+        Settings::lastModeTime = now;
+    }
 }
 
 // handleSetInterrupts sets the interrupt Set flag to true.
 void handleSetInterrupts() {
-    if (!Settings::isI2CActive) // Skip setting the interrupt if i2c is in progress
+    now = millis();
+    if (!Settings::isI2CActive && (now - Settings::lastSetTime > Settings::DEBOUNCE_DELAY)) {
         Settings::isSetFlagOn = true;
+        Settings::lastSetTime = now;
+    }
 }
 
 // Main function.
