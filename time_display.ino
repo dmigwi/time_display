@@ -11,11 +11,15 @@ namespace Settings
         NORMAL, UNKNOWN // Control modes
     };
 
-    // isModeFlag is set to true by the interrupt triggered by the mode button.
-    volatile bool isModeFlag {false};
+    // isModeFlagOn is set to true by the interrupt triggered by the mode button.
+    volatile bool isModeFlagOn {false};
 
-    // isSetFlag is set to true by the interrupt triggered by the set button.
-    volatile bool isSetFlag {false};
+    // isSetFlagOn is set to true by the interrupt triggered by the set button.
+    volatile bool isSetFlagOn {false};
+
+    // isI2CActive is set to true when the i2C communication with DS1307RTC chipset
+    // is in progress otherwise false.
+    volatile bool isI2CActive {false};
 
     // namespace Settings
     // DATETIME_FIELDS ito track date and time a total of 6 fields are required.
@@ -28,8 +32,8 @@ namespace Settings
     constexpr int REFRESH_CYCLE{500};
 
     // dateTimeArray stores processed fields required to display date and time
-    // accurately. The default time set up is 13:32:10  23/Nov/2024.
-    int dateTimeArray[DATETIME_FIELDS] = {10, 32, 13, 23, 11, 2024};
+    // accurately. The default time set up is 02:32:11  20/May/2025.
+    int dateTimeArray[DATETIME_FIELDS] = {11, 32, 02, 20, 05, 2025};
 
     // display contains byte array input for the Max7219 for the dot matrix display
     // per number.
@@ -59,6 +63,9 @@ class DateTime {
         // readDatetime is a routinely invoked method that returns the current time of
         // as available in the DS1307 RTC chipset.
         void readDatetime() {
+            // Activate the I2C Flag before initiating the i2c communication.
+            Settings::isI2CActive = true;
+
             // Start I2C protocol with DS1307 address
             Wire.beginTransmission( DS1307_ADDRESS);
             Wire.write(0);                // Send register address
@@ -81,14 +88,20 @@ class DateTime {
                 Settings::dateTimeArray[i] = (data / 16) * 10 + (data % 16);
                 i++;
             }
+
+            // Disable i2c flag after the I2C communication is over.
+            Settings::isI2CActive = false;
         }
 
-         // setDatetime should be called once when setting up the program. Its writes
+        // setDatetime should be called once when setting up the program. Its writes
         // the time set to the DS1307 RTC hardware.
         void setDatetime() {
+            // Activate the I2C Flag before initiating the i2c communication.
+            Settings::isI2CActive = true;
+
             // Write data to DS1307 RTC. Start I2C protocol with DS1307 address.
             Wire.beginTransmission(DS1307_ADDRESS);
-            Wire.write(0);        // Send register address
+            Wire.write(0x00);        // Send register address
 
             // Write data for the 6 data fields
             for (int i{0}; i < Settings::DATETIME_FIELDS; i++) {
@@ -98,6 +111,9 @@ class DateTime {
             }
 
             Wire.endTransmission();  // Stop transmission and release the I2C bus
+
+            // Disable i2c flag after the I2C communication is over.
+            Settings::isI2CActive = false;
         }
 
     private:
@@ -119,6 +135,10 @@ class MatrixDisplay : public DateTime {
                 m_lc.setIntensity(addr, 0);  // sets brightness (0~15 possible values)
                 m_lc.clearDisplay(addr);     // clear screen
             }
+
+            // Fake interrupts may have turned these flags on, set to false.
+            Settings::isModeFlagOn = false;
+            Settings::isSetFlagOn = false;
         }
 
         // isThinChar returns true if the value provided is thin character
@@ -221,21 +241,22 @@ class MatrixDisplay : public DateTime {
         // supported.
         void displayRow(int rowNo, unsigned long rowData) {
             for (int i{0}; i < m_lc.getDeviceCount(); ++i)
-            m_lc.setRow(i, rowNo, rowData >> (8 * i));  // extract 8 bits.
+                m_lc.setRow(i, rowNo, rowData >> (8 * i));  // extract 8 bits.
         }
 
         // handleMode shifts the current mode to the next inline if an interrupt
         // is detected.
         void handleMode() {
-            if (!Settings::isModeFlag) // Ignore further action if mode flag is off.
+            if (!Settings::isModeFlagOn) // Ignore further action if mode flag is off.
                 return;
 
-            // Reset if current mode is not SET_TIME mode otherwise shift by one.
-            m_currentMode = static_cast<Settings::DisplayMode>(
-                IsSetTimeMode() ? (m_currentMode+1) : 0
-            );
             // Set the interrupt flag to off.
-            Settings::isModeFlag = false;
+            Settings::isModeFlagOn = false;
+
+            // Reset if current mode is a SET_TIME mode shift by one otherwise set it to seconds.
+            m_currentMode = static_cast<Settings::DisplayMode>(
+                (m_currentMode+1) %  Settings::UNKNOWN
+            );
 
             if (IsNormalMode()) // If NORMAL update the currently set date.
                 setDatetime();
@@ -244,11 +265,11 @@ class MatrixDisplay : public DateTime {
         void handleTimeSetting() {
             // Ignore further action if SetFlag is false or current mode is
             // neither any of the SET_TIME modes.
-            if (!Settings::isSetFlag || !IsSetTimeMode())
+            if (!Settings::isSetFlagOn || !IsSetTimeMode())
                 return;
 
             // Set the interrupt flag to off.
-            Settings::isSetFlag = false;
+            Settings::isSetFlagOn = false;
 
             // limit set to 24 Hours if mode is SET_HOURS otherwise set to 60 Seconds/Minutes
             int limit = (IsSetHoursMode() ? 24 : 60);
@@ -292,15 +313,17 @@ class MatrixDisplay : public DateTime {
 
 // handleModeInterrupts set the interrupt Mode flag to true.
 void handleModeInterrupts() {
-    Settings::isModeFlag = true;
+    if (!Settings::isI2CActive) // Skip setting the interrupt if i2c is in progress
+        Settings::isModeFlagOn = true;
 }
 
 // handleSetInterrupts sets the interrupt Set flag to true.
 void handleSetInterrupts() {
-    Settings::isSetFlag = true;
+    if (!Settings::isI2CActive) // Skip setting the interrupt if i2c is in progress
+        Settings::isSetFlagOn = true;
 }
 
-
+// Main function.
 int main(int, char*) {
     init();
 
@@ -308,7 +331,6 @@ int main(int, char*) {
     USBDevice.attach();
 #endif
 
-    // Serial.begin(115200);
     delay(1000); // Delay
 
     const int devices{4};
@@ -328,8 +350,8 @@ int main(int, char*) {
     pinMode(SET_PIN, INPUT_PULLUP);
 
     // Handle Mode and Set interrupts on falling edge
-    attachInterrupt(digitalPinToInterrupt(MODE_PIN), handleModeInterrupts, RISING);
-    attachInterrupt(digitalPinToInterrupt(SET_PIN), handleSetInterrupts, RISING);
+    attachInterrupt(digitalPinToInterrupt(MODE_PIN), handleModeInterrupts, FALLING);
+    attachInterrupt(digitalPinToInterrupt(SET_PIN), handleSetInterrupts, FALLING);
 
     MatrixDisplay md{DIN, CLK, CS, devices};
     md.setUpDefaults();  // Set display defaults.
