@@ -356,8 +356,10 @@ int main(int, char*) {
     const int CLK{8};
 
     // Time setting interrupt pins
-    const int MODE_PIN {3};
-    const int SET_PIN {7};
+    // Interrupt pin 2 recieves a lot of noise because of bieng close to the USB
+    // interface and should only be used if pin 7 is already in use.
+    const int MODE_PIN {3}; // (Leonardo) Stable, general-purpose external interrupt pin
+    const int SET_PIN {7}; // (Leonardo) Dedicated interrupt pin, clean, minimal interference
 
     pinMode(DIN, OUTPUT);
     pinMode(CLK, OUTPUT);
