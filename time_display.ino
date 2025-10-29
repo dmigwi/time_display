@@ -356,8 +356,8 @@ int main(int, char*) {
     const int CLK{8};
 
     // Time setting interrupt pins
-    const int MODE_PIN {2};
-    const int SET_PIN {3};
+    const int MODE_PIN {3};
+    const int SET_PIN {7};
 
     pinMode(DIN, OUTPUT);
     pinMode(CLK, OUTPUT);
